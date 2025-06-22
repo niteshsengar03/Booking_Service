@@ -1,3 +1,7 @@
-export async function createBooking(){
+export async function createBookingService(){
     
 } 
+
+export async function finalizeBookingService(){
+    
+}
