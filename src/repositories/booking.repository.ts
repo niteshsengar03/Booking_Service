@@ -60,6 +60,7 @@ export async function confirmBooking(bookingId: number) {
             status: "CONFIRMED"
         }
     })
+    return booking;
 }
 
 export async function cancelBooking(bookingId:number){
@@ -71,6 +72,7 @@ export async function cancelBooking(bookingId:number){
             status:"CANCELLED"
         }
     })
+    return booking;
 }
 
 
