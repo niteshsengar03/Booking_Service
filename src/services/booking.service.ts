@@ -1,10 +1,12 @@
-import { confirmBooking, createBooking, createIdempotencyKey, finalzeIdempotencyKey, getIdempotencyKey } from "../repositories/booking.repository"
+import { confirmBooking, createBooking, createIdempotencyKey, finalzeIdempotencyKey, getIdempotencyKeyWithLock } from "../repositories/booking.repository"
 import { BadRequestError, NotFoundError } from "../utils/errors/app.error";
 import { generateIdempotencykey } from "../utils/generateIdempotencykey";
 import { CreateBookingDTO } from "../dto/booking.dto";
 
-export async function createBookingService(createBookingDTO:CreateBookingDTO) {
-    
+import primsaClient from '../prisma/client';
+
+export async function createBookingService(createBookingDTO: CreateBookingDTO) {
+
     const booking = await createBooking({
         userId: createBookingDTO.userId,
         hotelId: createBookingDTO.hotelId,
@@ -14,30 +16,36 @@ export async function createBookingService(createBookingDTO:CreateBookingDTO) {
 
     const idempotencyKey = generateIdempotencykey();
 
-    await createIdempotencyKey(idempotencyKey,booking.id);
-    
+    await createIdempotencyKey(idempotencyKey, booking.id);
+
     return {
-        bookingId:booking.id,
-        idempotencyKey:idempotencyKey
+        bookingId: booking.id,
+        idempotencyKey: idempotencyKey
     }
 }
 
-export async function confrimBookingService(idempotencyKey:string) {
-    const idempotencyKeyData = await getIdempotencyKey(idempotencyKey);
-    if(!idempotencyKeyData){
-        throw new NotFoundError('Idempotency key not found');
-    }
-    if(idempotencyKeyData.finalized){
-        throw new BadRequestError('Idempotency key is already finalised');
-    }
 
-    if (idempotencyKeyData.bookingId === null) {
-        throw new NotFoundError('Booking ID not found for the given idempotency key');
-    }
+// implementing transaction and pestimic lock on row when using getIdempotnecyKey
+export async function confrimBookingService(idempotencyKey: string) {
+    return primsaClient.$transaction(async (tx) => {
+        const idempotencyKeyData = await getIdempotencyKeyWithLock(tx, idempotencyKey);
+        // not found check is done in repositroy layer
+        if (!idempotencyKeyData) {
+            throw new NotFoundError('Idempotency key not found');
+        }
+        if (idempotencyKeyData.finalized) {
+            throw new BadRequestError('Idempotency key is already finalised');
+        }
 
-    const booking = await confirmBooking(idempotencyKeyData.bookingId);
+        if (idempotencyKeyData.bookingId === null) {
+            throw new NotFoundError('Booking ID not found for the given idempotency key');
+        }
 
-    await finalzeIdempotencyKey(idempotencyKey);
+        const booking = await confirmBooking(tx, idempotencyKeyData.bookingId); 
 
-    return booking;
+        await finalzeIdempotencyKey(tx, idempotencyKey);
+
+        return booking;
+    })
+
 }
